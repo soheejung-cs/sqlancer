@@ -30,6 +30,7 @@ import sqlancer.cockroachdb.CockroachDBProvider;
 import sqlancer.common.log.Loggable;
 import sqlancer.common.query.Query;
 import sqlancer.common.query.SQLancerResultSet;
+import sqlancer.cubrid.CUBRIDProvider;
 import sqlancer.databend.DatabendProvider;
 import sqlancer.doris.DorisProvider;
 import sqlancer.duckdb.DuckDBProvider;
@@ -813,6 +814,7 @@ public final class Main {
             providers.add(new CitusProvider());
             providers.add(new ClickHouseProvider());
             providers.add(new CockroachDBProvider());
+            providers.add(new CUBRIDProvider());
             providers.add(new DatabendProvider());
             providers.add(new DorisProvider());
             providers.add(new DuckDBProvider());
