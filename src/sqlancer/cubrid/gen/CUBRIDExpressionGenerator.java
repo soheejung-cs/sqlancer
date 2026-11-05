@@ -114,9 +114,11 @@ public class CUBRIDExpressionGenerator extends TypedExpressionGenerator<CUBRIDEx
                             CUBRIDPostfixOperator.IS_UNKNOWN, CUBRIDPostfixOperator.IS_NOT_UNKNOWN));
         case BETWEEN:
             type = getRandomType();
-            return new CUBRIDBetweenOperation(generateExpression(type, depth + 1),
-                    generateExpression(comparableType(type), depth + 1),
-                    generateExpression(comparableType(type), depth + 1), Randomly.getBoolean());
+            // the bounds keep the kind of the operand while CUBRIDBugs.betweenNegationCastsToDouble
+            CUBRIDDataType lower = CUBRIDBugs.betweenNegationCastsToDouble ? type : comparableType(type);
+            CUBRIDDataType upper = CUBRIDBugs.betweenNegationCastsToDouble ? type : comparableType(type);
+            return new CUBRIDBetweenOperation(generateExpression(type, depth + 1), generateExpression(lower, depth + 1),
+                    generateExpression(upper, depth + 1), Randomly.getBoolean());
         case IN:
             type = getRandomType();
             List<CUBRIDExpression> list = new ArrayList<>();

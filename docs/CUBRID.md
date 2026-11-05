@@ -70,7 +70,7 @@ java -Xmx2g -jar ../target/sqlancer-2.0.0.jar \
 | `--test-joins` | true | 조인을 만들지 |
 | `--max-num-tables` | 3 | 만들 테이블 수 상한 |
 | `--query-timeout` | 10 | 문장 하나의 시간 상한(초, 브로커가 끊는다) |
-| `--test-float` | false | FLOAT 열을 만들지 — 정밀도 차이를 따로 모으는 캠페인에서만 켠다(아래 5) |
+| `--test-float` | false | FLOAT 열을 만들지 — 켜면 FLOAT·INT 비교 결함이 다시 보고된다(아래 5) |
 
 - `--num-queries` 는 DB 하나에 던질 질의 수다. SQLancer 기본값 100000 이면 몇 시간을 돌려도 DB(스키마·데이터)가 수십
   개뿐이라, 인덱스·통계·데이터 모양에 달린 옵티마이저 결함을 덜 훑는다. 2000 이면 4스레드에서 새 DB 를 초당 약 0.5개 만든다
@@ -97,11 +97,13 @@ csql -u dba sqlancer0 -i case.sql      # 캠페인이 쓰지 않는 풀 DB 에�
 ## 5. 결함과 정밀도 차이를 가른다
 
 CUBRID 는 성능을 위해 NUMERIC 으로 캐스트하고 연산자마다 정해진 변환을 한다. 그 때문에 생기는 정밀도 차이는
-결함 목록에 넣지 않고 따로 모은다. 예: FLOAT 과 INT 의 비교는 FLOAT 으로 반올림되어 TLP 가 어긋날 수 있다.
-BIGINT 열도 2^53 을 넘는 값이 DOUBLE 경계(`0.5E0` 같은 지수 리터럴)와 비교되면 같은 일이 생긴다.
+결함 목록에 넣지 않고 따로 모은다. 예: NUMERIC 중간 결과가 38자리를 넘는 것, `%`·`DIV` 가 정수 연산자인 것.
 가르는 법 — 준비 문장의 FLOAT 열을 DOUBLE 로, 또는 DOUBLE 리터럴을 지수 없는 같은 값(NUMERIC)으로 바꿔 다시 돌려 합이
-맞으면 정밀도 계열이다. 그래서 FLOAT 열은
-`--test-float true` 일 때만 만든다.
+맞으면 정밀도 계열이다.
+
+다만 **같은 행에서 술어와 그 부정이 모순되면**(p 와 NOT p 가 둘 다 참이거나 둘 다 거짓) 변환 때문이어도 결함으로 본다.
+FLOAT 과 INT 의 비교(FLOAT 으로 반올림, p 와 NOT p 가 둘 다 참)와, 2^53 을 넘는 BIGINT 와 DOUBLE 경계가 섞인
+BETWEEN(WHERE 의 NOT 만 DOUBLE 로 비교, 둘 다 거짓)이 그렇다. 그래서 FLOAT 열은 `--test-float true` 일 때만 만든다.
 
 ## 6. 알려진 결함 스위치
 
@@ -117,6 +119,8 @@ BIGINT 열도 2^53 을 넘는 값이 DOUBLE 경계(`0.5E0` 같은 지수 리터�
 | `inListCoercedToFixedLengthElement` | IN 목록을 길이가 정해진 원소의 도메인으로 바꾸다 오류 |
 | `caseFoldWithNullBranchCrash` | CASE 상수 접기에서 클라이언트 크래시 — 켜져 있으면 CASE 갈래에 NULL 상수를 넣지 않는다 |
 | `likeRuntimePatternMissesEmptyString` | 실행 때 정해지는 LIKE 패턴('', '%')이 빈 문자열 행을 놓친다 — 켜져 있으면 패턴을 리터럴로만 만든다 |
+| `betweenNegationCastsToDouble` | WHERE 의 NOT BETWEEN 이 정수와 DOUBLE 이 섞인 피연산자를 모두 DOUBLE 로 바꿔, 2^53 을 넘는 BIGINT 행이 p·NOT p 둘 다에서 빠진다 — 켜져 있으면 BETWEEN 경계를 피연산자와 같은 종류로 만든다 |
+| (스위치 없음) | FLOAT 과 INT 의 비교에서 p 와 NOT p 가 둘 다 참 — `--test-float` 기본값 false 로 피한다 |
 
 ## 7. 주의
 

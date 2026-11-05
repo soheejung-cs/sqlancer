@@ -34,7 +34,7 @@ public final class CUBRIDBugs {
 
     // Folding a constant-false WHEN of a simple CASE whose result is a NUMERIC, with a THEN NULL branch after it,
     // dereferences a NULL cast type in pt_fold_const_expr (): the client (csql, or the broker's CAS) dies of SIGSEGV,
-    // which the JDBC driver reports as "Request timed out".
+    // which the JDBC driver reports as "Request timed out". CBRD-27948.
     // SELECT CASE 'q' WHEN c THEN 1.5 WHEN 'z' THEN 1 WHEN c THEN NULL ELSE 2 END FROM (SELECT 'a' AS c FROM db_root) x
     public static boolean caseFoldWithNullBranchCrash = true;
 
@@ -43,6 +43,13 @@ public final class CUBRIDBugs {
     // that matches it ('' or '%') loses the rows where c = ''. A prepared c LIKE ? with '%' bound misses them too.
     // SELECT COUNT(*) FROM t WHERE c LIKE NULLIF('', CAST(1 AS VARCHAR)) -- t has rows c = ''
     public static boolean likeRuntimePatternMissesEmptyString = true;
+
+    // In the WHERE clause, NOT of a BETWEEN that mixes integer and DOUBLE operands casts all three to DOUBLE, while the
+    // BETWEEN itself compares the integers exactly: a BIGINT beyond 2^53, which a DOUBLE cannot tell from its neighbor,
+    // satisfies neither p nor NOT p. (A FLOAT column compared with an INT makes p and NOT p both TRUE instead; FLOAT
+    // columns are generated only with --test-float true.)
+    // SELECT COUNT(*) FROM t WHERE NOT (c BETWEEN c + 2 AND 0.5E0) -- c BIGINT -9223372036854775808: 0, expected 1
+    public static boolean betweenNegationCastsToDouble = true;
 
     private CUBRIDBugs() {
     }

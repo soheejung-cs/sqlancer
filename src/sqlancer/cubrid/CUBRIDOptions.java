@@ -34,8 +34,8 @@ public class CUBRIDOptions implements DBMSSpecificOptions<CUBRIDOracleFactory> {
 
     // A FLOAT compared with an INT is compared as a FLOAT, so the precision it loses shows as TLP mismatches. Those
     // are kept out of the defect list and collected apart: generate FLOAT columns only in such a campaign.
-    @Parameter(names = "--test-float", description = "Generate FLOAT columns (their precision mismatches are "
-            + "collected apart from the defects)", arity = 1)
+    @Parameter(names = "--test-float", description = "Generate FLOAT columns (a FLOAT compared with an INT makes a "
+            + "predicate and its negation both TRUE, a known defect)", arity = 1)
     public boolean testFloat;
 
     @Override
