@@ -26,6 +26,10 @@ public class CUBRIDOptions implements DBMSSpecificOptions<CUBRIDOracleFactory> {
     @Parameter(names = "--test-joins", description = "Allow the generation of JOIN clauses", arity = 1)
     public boolean testJoins = true;
 
+    @Parameter(names = "--test-subqueries", description = "Allow [NOT] EXISTS, [NOT] IN and ALL/ANY/SOME subqueries, "
+            + "correlated ones among them", arity = 1)
+    public boolean testSubqueries = true;
+
     @Parameter(names = "--max-num-tables", description = "The maximum number of tables to create")
     public int maxNumTables = 3;
 

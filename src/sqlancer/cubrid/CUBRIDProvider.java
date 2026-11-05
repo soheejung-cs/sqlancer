@@ -21,10 +21,12 @@ import sqlancer.SQLProviderAdapter;
 import sqlancer.StatementExecutor;
 import sqlancer.common.query.SQLQueryAdapter;
 import sqlancer.common.query.SQLQueryProvider;
+import sqlancer.cubrid.gen.CUBRIDDeleteGenerator;
 import sqlancer.cubrid.gen.CUBRIDIndexGenerator;
 import sqlancer.cubrid.gen.CUBRIDInsertGenerator;
 import sqlancer.cubrid.gen.CUBRIDStatisticsGenerator;
 import sqlancer.cubrid.gen.CUBRIDTableGenerator;
+import sqlancer.cubrid.gen.CUBRIDUpdateGenerator;
 
 @AutoService(DatabaseProvider.class)
 public class CUBRIDProvider extends SQLProviderAdapter<CUBRIDGlobalState, CUBRIDOptions> {
@@ -36,6 +38,9 @@ public class CUBRIDProvider extends SQLProviderAdapter<CUBRIDGlobalState, CUBRID
     private static final ThreadLocal<Integer> POOL_SLOT = ThreadLocal.withInitial(NEXT_POOL_SLOT::getAndIncrement);
     // the name Main gives the connection test, which it runs on its own thread before any worker starts
     private static final String CONNECTION_TEST_SUFFIX = "connectiontest";
+    // a server the master restarts after a crash: 2 minutes at most
+    private static final int RESTART_WAIT_ATTEMPTS = 60;
+    private static final long RESTART_WAIT_MILLIS = 2000;
 
     public CUBRIDProvider() {
         super(CUBRIDGlobalState.class, CUBRIDOptions.class);
@@ -44,6 +49,8 @@ public class CUBRIDProvider extends SQLProviderAdapter<CUBRIDGlobalState, CUBRID
     public enum Action implements AbstractAction<CUBRIDGlobalState> {
 
         INSERT(CUBRIDInsertGenerator::getQuery), //
+        UPDATE(CUBRIDUpdateGenerator::getQuery), //
+        DELETE(CUBRIDDeleteGenerator::getQuery), //
         CREATE_INDEX(CUBRIDIndexGenerator::getQuery), //
         UPDATE_STATISTICS(CUBRIDStatisticsGenerator::getQuery);
 
@@ -64,6 +71,10 @@ public class CUBRIDProvider extends SQLProviderAdapter<CUBRIDGlobalState, CUBRID
         switch (a) {
         case INSERT:
             return r.getInteger(0, globalState.getOptions().getMaxNumberInserts());
+        case UPDATE:
+            return r.getInteger(0, 4);
+        case DELETE:
+            return r.getInteger(0, 2);
         case CREATE_INDEX:
             return r.getInteger(0, 3);
         case UPDATE_STATISTICS:
@@ -105,9 +116,34 @@ public class CUBRIDProvider extends SQLProviderAdapter<CUBRIDGlobalState, CUBRID
         String database = cubridOptions.databasePoolPrefix + slot;
         String url = String.format("jdbc:cubrid:%s:%d:%s:::?queryTimeout=%d", host, port, database,
                 cubridOptions.queryTimeout);
-        Connection con = DriverManager.getConnection(url, user, password);
+        Connection con = connect(url, user, password, cubridOptions.debugServer);
         dropUserClasses(con);
         return new SQLConnection(con);
+    }
+
+    // A crashed debug server is back in a few seconds when the master restarts it (auto_restart_server): wait for it
+    // rather than report every database the threads fail to create meanwhile. The crash itself is reported by the
+    // statement that was running.
+    private static Connection connect(String url, String user, String password, boolean waitForRestart)
+            throws SQLException {
+        for (int attempt = 0;; attempt++) {
+            try {
+                return DriverManager.getConnection(url, user, password);
+            } catch (SQLException e) {
+                String message = String.valueOf(e.getMessage());
+                boolean down = message.contains("Failed to connect to database server")
+                        || message.contains("has not been restarted");
+                if (!waitForRestart || !down || attempt >= RESTART_WAIT_ATTEMPTS) {
+                    throw e;
+                }
+                try {
+                    Thread.sleep(RESTART_WAIT_MILLIS);
+                } catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                    throw e;
+                }
+            }
+        }
     }
 
     // Empties the pool database. A view names its tables: class_type VCLASS sorts after CLASS, so DESC drops the

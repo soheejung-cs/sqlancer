@@ -3,12 +3,21 @@
 SQLancer 가 임의의 스키마·데이터·질의를 만들어 CUBRID 에 보내고, 같은 답이어야 하는 질의들의 결과를 비교해
 옵티마이저·실행기의 논리 결함을 찾는다. CUBRID 제공자는 `src/sqlancer/cubrid/` 에 있다(JIRA CBRD-27932).
 
-- 판정 방식(test oracle)은 **TLP WHERE**(Ternary Logic Partitioning) 하나다. 술어 `p` 가 있으면
-  `SELECT ... FROM t` 의 행 = `... WHERE p` + `... WHERE NOT p` + `... WHERE (p) IS NULL` 이어야 한다.
+- 판정 방식(test oracle)은 다섯 가지다. `--oracle` 에 쉼표로 여럿을 주면 질의마다 번갈아 쓴다.
+
+| `--oracle` | 같아야 하는 것 |
+|---|---|
+| `WHERE`(기본) | TLP WHERE(Ternary Logic Partitioning) — `SELECT ... FROM t` 의 행 = `... WHERE p` + `... WHERE NOT p` + `... WHERE (p) IS NULL` |
+| `NOREC` | `SELECT COUNT(*) ... WHERE p`(옵티마이저가 p 를 쓴다) = `SUM(CASE WHEN p THEN 1 ELSE 0 END)`(p 를 행마다 계산) |
+| `HAVING` | TLP HAVING — `GROUP BY` 질의의 그룹 = `HAVING p` + `HAVING NOT p` + `HAVING (p) IS NULL` |
+| `AGGREGATE` | `COUNT`·`SUM`·`MIN`·`MAX` 를 한 번에 구한 값 = WHERE p·NOT p·IS NULL 세 갈래에서 구해 다시 모은 값 |
+| `WHERE_PREPARED` | TLP WHERE 를 준비문으로 — 상수를 `?` 로 바인드하고, 절반은 같은 준비문을 한 번 더 실행해 캐시된 계획도 본다 |
+
   어긋나면 결과 불일치로, 예상하지 못한 오류가 나면 그 오류로 보고한다.
-- 만드는 것: 테이블 1~3개(SMALLINT·INTEGER·BIGINT·DOUBLE·VARCHAR 열, NOT NULL·UNIQUE·PRIMARY KEY), INSERT,
+- 만드는 것: 테이블 1~3개(SMALLINT·INTEGER·BIGINT·DOUBLE·VARCHAR 열, NOT NULL·UNIQUE·PRIMARY KEY), INSERT·UPDATE·DELETE,
   인덱스(UNIQUE·DESC 포함), `UPDATE STATISTICS`, 그리고 타입을 맞춘 식 — 비교·논리·IS [NOT] NULL·IS [NOT]
-  TRUE/FALSE/UNKNOWN·BETWEEN·IN·LIKE·산술·CASE·CAST·함수, INNER/CROSS 조인.
+  TRUE/FALSE/UNKNOWN·BETWEEN·IN·LIKE·산술·CASE(단순·검색형)·CAST·함수, 부질의([NOT] EXISTS·[NOT] IN·ALL/ANY/SOME,
+  바깥 열을 쓰는 상관 부질의 포함), 집계·GROUP BY·HAVING, INNER/CROSS/LEFT/RIGHT 조인, ORDER BY.
 - 지금까지 찾은 결함과 재현 SQL 은 CBRD-27932 의 첨부 파일에 있다.
 
 ## 1. 준비
@@ -65,9 +74,10 @@ java -Xmx2g -jar ../target/sqlancer-2.0.0.jar \
 
 | 옵션 | 기본 | 뜻 |
 |---|---|---|
-| `--oracle` | WHERE | 판정 방식 |
+| `--oracle` | WHERE | 판정 방식 — WHERE·NOREC·HAVING·AGGREGATE·WHERE_PREPARED, 쉼표로 여럿 |
 | `--database-pool-prefix` | sqlancer | 풀 DB 이름 앞부분 |
 | `--test-joins` | true | 조인을 만들지 |
+| `--test-subqueries` | true | 부질의를 만들지 |
 | `--max-num-tables` | 3 | 만들 테이블 수 상한 |
 | `--query-timeout` | 10 | 문장 하나의 시간 상한(초, 브로커가 끊는다) |
 | `--test-float` | false | FLOAT 열을 만들지 — 켜면 FLOAT·INT 비교 결함이 다시 보고된다(아래 5) |
@@ -91,6 +101,12 @@ csql -u dba sqlancer0 -i case.sql      # 캠페인이 쓰지 않는 풀 DB 에�
 
 - 결과 불일치: 원 질의 행 수와 세 갈래 행 수의 합을 비교한다. 세 갈래를 따로 돌리면(`UNION ALL` 을 나눠서)
   어느 갈래가 틀렸는지 보인다.
+- `NOREC`: `the counts mismatch (a and b)` 아래에 두 질의가 남는다. `COUNT(*) ... WHERE p` 쪽이 틀린 경우가 많다(옵티마이저가 p 를 바꾼다).
+- `AGGREGATE`: `The aggregates mismatch` 아래에 한 번에 구한 질의와 세 갈래를 모은 질의가 남는다. DOUBLE 의 `SUM` 은
+  더하는 순서에 따라 끝자리가 달라 만들지 않는다.
+- `WHERE_PREPARED`: 지금(develop 2026-11-05)은 JDBC 준비문에서 'Invalid XASL tree node content.' 를 자주 보고한다(조사 중) —
+  긴 캠페인에는 아직 넣지 않는다. 어긋난 질의 위의 `-- prepared:` 줄이 `?` 가 든 준비문, `-- parameters:` 줄이 바인드 값이다. csql 로
+  다시 돌릴 때는 `?` 자리에 값을 넣되, 같은 질의를 리터럴로 돌려 맞으면 준비문·계획 캐시 쪽 결함이다.
 - `No more data`: JDBC 연결이 끊긴 것이다. 그 시각 CAS 프로세스가 살아 있고 csql 로 다시 돌려 정상이면 연결 문제로 본다.
 - `Request timed out`: 문장이 오래 걸렸거나, 클라이언트(브로커의 CAS)가 죽어 응답이 없었던 것이다. csql 로 다시
   돌려 csql 이 죽으면 크래시다(코어 덤프 확인).
@@ -114,14 +130,19 @@ BETWEEN(WHERE 의 NOT 만 DOUBLE 로 비교, 둘 다 거짓)이 그렇다. 그�
 | 스위치 | 결함 |
 |---|---|
 | `setOperationFoldedToNull` | 갈래가 모두 상수 거짓인 집합 연산을 NULL 값으로 접는다 |
-| `outerJoinReducedByNullablePredicate` | NULL 에도 참인 술어로 외부 조인을 내부 조인으로 줄인다 — 켜져 있으면 INNER/CROSS 만 만든다 |
-| `orderBySkipOnIsFalse` | `(c IS NOT NULL) IS FALSE` 를 NOT NULL 증거로 보고 ORDER BY 를 생략한다 — 켜져 있으면 ORDER BY 를 만들지 않는다 |
-| `nullSafeEqualsOfTwoMinuses` | `-x <=> -y` 가 'unknown opcode' 오류 |
+| `outerJoinReducedByNullablePredicate` | NULL 에도 참인 술어로 외부 조인을 내부 조인으로 줄인다 — 켜져 있으면 외부 조인이 있는 질의의 WHERE 에 IN 목록·BETWEEN·IS TRUE/FALSE/UNKNOWN·술어를 품은 IS [NOT] NULL 을 넣지 않는다 |
+| `orderBySkipOnIsFalse` | `(c IS NOT NULL) IS FALSE` 를 NOT NULL 증거로 보고 ORDER BY 를 생략한다 — 켜져 있으면 ORDER BY 가 있는 질의의 WHERE 에서 위와 같은 꼴을 뺀다 |
+| `nullSafeEqualsOfTwoMinuses` | `-x <=> -y` 가 'unknown opcode' 오류(debug 클라이언트는 assert 로 죽는다) — 켜져 있으면 두 피연산자 어딘가에 단항 마이너스가 있을 때 `<=>` 대신 `=` 를 쓴다(`+(-x)`, `-x` 로 접히는 CASE 도 같은 재작성에 닿는다) |
 | `inListCoercedToFixedLengthElement` | IN 목록을 길이가 정해진 원소의 도메인으로 바꾸다 오류 |
-| `caseFoldWithNullBranchCrash` | CASE 상수 접기에서 클라이언트 크래시 — 켜져 있으면 CASE 갈래에 NULL 상수를 넣지 않는다 |
+| `caseFoldWithNullBranchCrash` | CASE 상수 접기에서 클라이언트 크래시(CBRD-27948) — 켜져 있으면 CASE 갈래에 NULL 상수를 넣지 않는다 |
 | `likeRuntimePatternMissesEmptyString` | 실행 때 정해지는 LIKE 패턴('', '%')이 빈 문자열 행을 놓친다 — 켜져 있으면 패턴을 리터럴로만 만든다 |
 | `betweenNegationCastsToDouble` | WHERE 의 NOT BETWEEN 이 정수와 DOUBLE 이 섞인 피연산자를 모두 DOUBLE 로 바꿔, 2^53 을 넘는 BIGINT 행이 p·NOT p 둘 다에서 빠진다 — 켜져 있으면 BETWEEN 경계를 피연산자와 같은 종류로 만든다 |
 | (스위치 없음) | FLOAT 과 INT 의 비교에서 p 와 NOT p 가 둘 다 참 — `--test-float` 기본값 false 로 피한다 |
+| `constantFalseSubqueryIsNullTyped` | WHERE 가 컴파일 때 거짓으로 접히는 부질의가 NULL 값이 되어, ALL/ANY/SOME 은 'operator is not defined … and null' 오류, IN·EXISTS 는 거짓 대신 NULL — 켜져 있으면 부질의 WHERE 의 잎을 열로만 만들고 그 오류를 예상 오류로 둔다 |
+| `foldedFalseSubqueryInXaslCacheKey` | 그런 부질의를 감싼 EXISTS 를 접은 값이 `null` 로 출력되어, 같은 자리에 NULL 이 오는 질의와 XASL 캐시 항목을 공유한다(CBRD-27957) — 위와 같이 부질의 WHERE 를 열로만 만든다 |
+| `parallelUnionCorrelatedSubqueryCrash` | UNION ALL 갈래를 병렬로 실행할 때, 두 표를 조인한 갈래의 IN 부질의가 다른 표를 참조하면 서버가 죽는다(CBRD-27959) — 켜져 있으면 표를 둘 이상 읽는 질의의 부질의는 바깥 열을 쓰지 않는다 |
+| `existsSelectListHostVariable` | EXISTS 부질의의 선택 목록이 바인드 변수이고 그 EXISTS 를 값으로 쓰면(IS [NOT] NULL, 선택 목록) 내부 오류 — 켜져 있으면 준비문에서도 EXISTS 부질의의 상수는 리터럴로 둔다 |
+| `derivedColumnOfFoldedNullCoalesce` | 뒤 인자가 NULL 로 접히는 COALESCE(`CAST(NULL AS INT)` 등)는 VARCHAR 가 되는데, 그 위의 파생 테이블 열은 접기 전 타입(정수)을 가져 서버·클라이언트가 문자열을 정수로 읽는다 — 켜져 있으면 집계 인자에 COALESCE 를 쓰지 않는다 |
 | `debugXaslDumpUsesQueryAsFormat` | debug 서버가 병렬 실행기로 가는 질의(UNION ALL 등)의 XASL 을 덤프하며 질의 문장을 printf 서식으로 써, 리터럴의 `%n` 에 죽는다(CBRD-27955) — `--debug-server true` 이면 문자열·LIKE 패턴·연산자에 `%` 를 쓰지 않는다 |
 
 ## 7. debug 빌드로 돌리기
@@ -132,11 +153,13 @@ debug 빌드 서버는 assert 가 판정 수단이 된다(assert 에 걸리면 �
 ```bash
 java -Xmx2g -jar ../target/sqlancer-2.0.0.jar --num-threads 4 --num-tries 1000 --num-queries 2000 \
      --log-each-select true --print-progress-summary true \
-     cubrid --oracle WHERE --debug-server true --query-timeout 30 > run.out 2>&1 &
+     cubrid --oracle WHERE,NOREC,HAVING,AGGREGATE,WHERE_PREPARED --debug-server true --query-timeout 30 > run.out 2>&1 &
 echo $! > run.pid
 ../scripts/cubrid/sqlancer-cubrid-watchdog.sh . 4 &     # 서버가 죽은 기록(오류 로그 끝·코어)을 ./watchdog.log 에
 ```
 
+- `--debug-server true` 이면 서버에 붙지 못할 때(죽은 서버를 master 가 다시 띄우는 동안) 2초 간격으로 2분까지 기다린다 —
+  그동안 만들지 못한 DB 마다 보고가 쌓이지 않게. 크래시는 그때 돌던 질의가 'server failure' 로 한 번 보고한다.
 - 서버가 죽으면 master 가 보통 스스로 다시 띄운다(`auto_restart_server`). 감시 스크립트는 그 기록을 남기고, 다시 뜨지 않은 서버를
   띄운다. 코어가 쏟아지지 않게 하루 30번까지만 띄운다(`MAX_RESTARTS`).
 - 서버 코어는 수 GB 다. 코어 디렉터리(`kernel.core_pattern`)의 여유를 먼저 본다.

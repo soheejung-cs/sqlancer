@@ -5,7 +5,6 @@ import java.util.List;
 
 import sqlancer.Randomly;
 import sqlancer.common.ast.newast.Join;
-import sqlancer.cubrid.CUBRIDBugs;
 import sqlancer.cubrid.CUBRIDGlobalState;
 import sqlancer.cubrid.CUBRIDSchema.CUBRIDColumn;
 import sqlancer.cubrid.CUBRIDSchema.CUBRIDDataType;
@@ -75,12 +74,13 @@ public class CUBRIDJoin implements CUBRIDExpression, Join<CUBRIDExpression, CUBR
             CUBRIDTableReference right = tableList.remove(0);
             List<CUBRIDColumn> columns = new ArrayList<>(left.getTable().getColumns());
             columns.addAll(right.getTable().getColumns());
-            JoinType joinType = CUBRIDBugs.outerJoinReducedByNullablePredicate
-                    ? Randomly.fromOptions(JoinType.INNER, JoinType.CROSS) : JoinType.getRandom();
+            // an outer join makes the WHERE leave out what the outer join reduction gets wrong
+            // (CUBRIDExpressionGenerator.getRandomJoinClauses)
+            JoinType joinType = JoinType.getRandom();
             CUBRIDExpression on = null;
             if (joinType != JoinType.CROSS) {
                 CUBRIDExpressionGenerator gen = new CUBRIDExpressionGenerator(globalState).setColumns(columns);
-                on = gen.generateExpression(CUBRIDDataType.BOOLEAN);
+                on = gen.withoutSubqueries().generateExpression(CUBRIDDataType.BOOLEAN);
             }
             joins.add(new CUBRIDJoin(left, right, joinType, on));
         }

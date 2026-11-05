@@ -9,4 +9,8 @@ public class CUBRIDBinaryOperation extends NewBinaryOperatorNode<CUBRIDExpressio
         super(left, right, op);
     }
 
+    public Operator getOp() {
+        return op;
+    }
+
 }

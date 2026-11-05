@@ -30,8 +30,29 @@ public final class CUBRIDErrors {
         return errors;
     }
 
+    // the same as patterns, where a plain substring would say too much
+    public static List<String> getExpressionErrorRegexes() {
+        List<String> regexes = new ArrayList<>();
+        if (CUBRIDBugs.constantFalseSubqueryIsNullTyped) {
+            regexes.add("'[^']* (all|any) ' operator is not defined on types .+ and null");
+        }
+        return regexes;
+    }
+
+    // what an oracle expects of the expressions it runs
+    public static ExpectedErrors getExpectedExpressionErrors() {
+        return ExpectedErrors.newErrors().with(getExpressionErrors()).withRegexString(getExpressionErrorRegexes())
+                .build();
+    }
+
     public static void addExpressionErrors(ExpectedErrors errors) {
         errors.addAll(getExpressionErrors());
+        errors.addAllRegexStrings(getExpressionErrorRegexes());
+    }
+
+    // what a prepared statement may raise on a host variable whose type the statement cannot settle
+    public static List<String> getHostVariableErrors() {
+        return new ArrayList<>();
     }
 
     public static List<String> getInsertErrors() {

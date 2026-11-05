@@ -2,6 +2,11 @@ package sqlancer.cubrid.ast;
 
 public abstract class CUBRIDConstant implements CUBRIDExpression {
 
+    // the value a prepared statement binds for this constant, or null where the literal stays in the text
+    public Object getBindValue() {
+        return null;
+    }
+
     public static class CUBRIDNullConstant extends CUBRIDConstant {
 
         @Override
@@ -20,6 +25,11 @@ public abstract class CUBRIDConstant implements CUBRIDExpression {
         }
 
         @Override
+        public Object getBindValue() {
+            return value;
+        }
+
+        @Override
         public String toString() {
             return String.valueOf(value);
         }
@@ -32,6 +42,11 @@ public abstract class CUBRIDConstant implements CUBRIDExpression {
 
         public CUBRIDDoubleConstant(double value) {
             this.value = value;
+        }
+
+        @Override
+        public Object getBindValue() {
+            return value;
         }
 
         @Override
@@ -49,6 +64,11 @@ public abstract class CUBRIDConstant implements CUBRIDExpression {
 
         public CUBRIDStringConstant(String value) {
             this.value = value;
+        }
+
+        @Override
+        public Object getBindValue() {
+            return value;
         }
 
         @Override
