@@ -165,6 +165,10 @@ public class CUBRIDExpressionGenerator extends TypedExpressionGenerator<CUBRIDEx
         if (!canGenerateSubquery()) {
             kinds.removeAll(
                     List.of(BooleanExpression.EXISTS, BooleanExpression.IN_SUBQUERY, BooleanExpression.QUANTIFIED));
+        } else if (CUBRIDBugs.antiJoinTakesNoTableTermIntoInnerScan) {
+            // an IN subquery is an anti join in the NOT partition, and a constant HAVING moved into the WHERE is a
+            // term that reads no table
+            kinds.remove(BooleanExpression.IN_SUBQUERY);
         }
         if (onlyColumnLeaves) {
             // c IS NULL next to a comparison of c is a contradiction CUBRID folds to FALSE all the same

@@ -89,8 +89,9 @@ public final class CUBRIDBugs {
     // expression left for run time, an uncorrelated subquery, a host variable) into its inner scan: when the term is
     // false the inner side is empty and every outer row comes out (CBRD-27605). TLP negates the predicate, so any
     // correlated subquery becomes such a NOT EXISTS in one partition: subqueries are then uncorrelated ones, one per
-    // predicate at most, since an uncorrelated NOT IN is an anti join too and another uncorrelated subquery is such a
-    // term.
+    // predicate at most, and none is an IN subquery, since an uncorrelated NOT IN is an anti join too (a constant
+    // HAVING
+    // or another uncorrelated subquery being the term that reads no table).
     // SELECT COUNT(*) FROM ta WHERE NOT EXISTS (SELECT 1 FROM tb WHERE tb.ca = ta.ca) AND (SELECT COUNT(*) FROM tc) > 5
     public static boolean antiJoinTakesNoTableTermIntoInnerScan = true;
 
