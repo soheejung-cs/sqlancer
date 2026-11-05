@@ -10,4 +10,8 @@ public class CUBRIDUnaryPrefixOperation extends NewUnaryPrefixOperatorNode<CUBRI
         super(expr, op);
     }
 
+    public Operator getOp() {
+        return op;
+    }
+
 }

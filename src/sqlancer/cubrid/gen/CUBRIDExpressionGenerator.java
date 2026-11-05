@@ -86,8 +86,21 @@ public class CUBRIDExpressionGenerator extends TypedExpressionGenerator<CUBRIDEx
             return CUBRIDConstant.createBooleanConstant(Randomly.getBoolean());
         }
         CUBRIDDataType left = getRandomType();
-        return new CUBRIDBinaryOperation(super.generateLeafNode(left), super.generateLeafNode(comparableType(left)),
-                CUBRIDComparisonOperator.getRandom());
+        return comparison(super.generateLeafNode(left), super.generateLeafNode(comparableType(left)));
+    }
+
+    private static CUBRIDExpression comparison(CUBRIDExpression left, CUBRIDExpression right) {
+        CUBRIDComparisonOperator op = CUBRIDComparisonOperator.getRandom();
+        if (op == CUBRIDComparisonOperator.NULL_SAFE_EQUALS && CUBRIDBugs.nullSafeEqualsOfTwoMinuses
+                && isUnaryMinus(left) && isUnaryMinus(right)) {
+            op = CUBRIDComparisonOperator.EQUALS;
+        }
+        return new CUBRIDBinaryOperation(left, right, op);
+    }
+
+    private static boolean isUnaryMinus(CUBRIDExpression expr) {
+        return expr instanceof CUBRIDUnaryPrefixOperation
+                && ((CUBRIDUnaryPrefixOperation) expr).getOp() == CUBRIDUnaryPrefixOperator.MINUS;
     }
 
     private CUBRIDExpression generateBooleanExpression(int depth) {
@@ -101,8 +114,7 @@ public class CUBRIDExpressionGenerator extends TypedExpressionGenerator<CUBRIDEx
                     generateExpression(CUBRIDDataType.BOOLEAN, depth + 1), CUBRIDLogicalOperator.getRandom());
         case COMPARISON:
             type = getRandomType();
-            return new CUBRIDBinaryOperation(generateExpression(type, depth + 1),
-                    generateExpression(comparableType(type), depth + 1), CUBRIDComparisonOperator.getRandom());
+            return comparison(generateExpression(type, depth + 1), generateExpression(comparableType(type), depth + 1));
         case IS_NULL:
             return new CUBRIDUnaryPostfixOperation(
                     generateExpression(Randomly.fromOptions(CUBRIDDataType.values()), depth + 1),

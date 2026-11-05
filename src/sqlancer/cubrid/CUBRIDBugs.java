@@ -23,7 +23,7 @@ public final class CUBRIDBugs {
 
     // A comparison of two unary minus operands, -x op -y, is rewritten to x op' y with the converse operator, which
     // <=> does not have: the operator becomes 0 and type checking fails with "'unknown opcode' operator is not
-    // defined".
+    // defined" (a debug client asserts in pt_show_binopcode () instead). The generator leaves that form out.
     // SELECT 1 FROM t WHERE (- a) <=> (- a)
     public static boolean nullSafeEqualsOfTwoMinuses = true;
 
