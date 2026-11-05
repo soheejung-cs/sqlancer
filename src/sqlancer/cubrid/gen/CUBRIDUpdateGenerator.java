@@ -43,6 +43,7 @@ public final class CUBRIDUpdateGenerator {
         ExpectedErrors errors = new ExpectedErrors();
         CUBRIDErrors.addInsertErrors(errors);
         CUBRIDErrors.addExpressionErrors(errors);
+        errors.add("cannot be made NULL"); // a NOT NULL column set to an expression that folds to NULL
         return new SQLQueryAdapter(sb.toString(), errors);
     }
 

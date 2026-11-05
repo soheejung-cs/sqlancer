@@ -6,6 +6,7 @@ import java.util.List;
 import sqlancer.Randomly;
 import sqlancer.common.query.ExpectedErrors;
 import sqlancer.common.query.SQLQueryAdapter;
+import sqlancer.cubrid.CUBRIDBugs;
 import sqlancer.cubrid.CUBRIDGlobalState;
 import sqlancer.cubrid.CUBRIDSchema.CUBRIDDataType;
 
@@ -37,7 +38,8 @@ public final class CUBRIDTableGenerator {
         }
         if (Randomly.getBooleanWithRatherLowProbability()) {
             sb.append(", PRIMARY KEY (");
-            sb.append(String.join(", ", Randomly.nonEmptySubset(columnNames)));
+            sb.append(CUBRIDBugs.singleColumnKeys(globalState) ? Randomly.fromList(columnNames)
+                    : String.join(", ", Randomly.nonEmptySubset(columnNames)));
             sb.append(')');
         }
         sb.append(')');

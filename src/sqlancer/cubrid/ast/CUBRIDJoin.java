@@ -5,6 +5,7 @@ import java.util.List;
 
 import sqlancer.Randomly;
 import sqlancer.common.ast.newast.Join;
+import sqlancer.cubrid.CUBRIDBugs;
 import sqlancer.cubrid.CUBRIDGlobalState;
 import sqlancer.cubrid.CUBRIDSchema.CUBRIDColumn;
 import sqlancer.cubrid.CUBRIDSchema.CUBRIDDataType;
@@ -80,6 +81,10 @@ public class CUBRIDJoin implements CUBRIDExpression, Join<CUBRIDExpression, CUBR
             CUBRIDExpression on = null;
             if (joinType != JoinType.CROSS) {
                 CUBRIDExpressionGenerator gen = new CUBRIDExpressionGenerator(globalState).setColumns(columns);
+                if (CUBRIDBugs.outerJoinOnTermWithoutTableFiltersAll
+                        && (joinType == JoinType.LEFT || joinType == JoinType.RIGHT)) {
+                    gen.withOnlyColumnLeaves();
+                }
                 on = gen.withoutSubqueries().generateExpression(CUBRIDDataType.BOOLEAN);
             }
             joins.add(new CUBRIDJoin(left, right, joinType, on));

@@ -3,7 +3,9 @@ package sqlancer.cubrid.gen;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 import sqlancer.Randomly;
@@ -54,11 +56,12 @@ public class CUBRIDExpressionGenerator extends TypedExpressionGenerator<CUBRIDEx
     private final CUBRIDGlobalState globalState;
     private List<CUBRIDTable> tables = Collections.emptyList();
     private boolean allowNullConstants = true;
-    // Set once the query has an outer join or an ORDER BY: the predicates then leave out the forms that the outer join
-    // reduction and the ORDER BY skip take for proof that a column is not NULL (CUBRIDBugs
-    // .outerJoinReducedByNullablePredicate, .orderBySkipOnIsFalse).
+    // Set once the query has an ORDER BY or a GROUP BY: the predicates then leave out the forms that the sort skip
+    // through an index takes for proof that a key column is not NULL (CUBRIDBugs.orderBySkipOnIsFalse).
     private boolean avoidNullableShapes;
     private int subqueryDepth;
+    // subqueries in the current predicate: one at most while CUBRIDBugs.antiJoinTakesNoTableTermIntoInnerScan holds
+    private int subqueryCount;
     // In a HAVING clause, a column outside an aggregate must be one of the GROUP BY columns: CUBRID takes any other
     // column too, with the value of an arbitrary row of the group, which no partition can reproduce.
     private List<CUBRIDColumn> groupColumns;
@@ -131,8 +134,16 @@ public class CUBRIDExpressionGenerator extends TypedExpressionGenerator<CUBRIDEx
         return new CUBRIDCastNode(new CUBRIDColumnReference(column), typeName);
     }
 
-    private static CUBRIDExpression comparison(CUBRIDExpression left, CUBRIDExpression right) {
+    private CUBRIDExpression comparison(CUBRIDExpression left, CUBRIDExpression right) {
         CUBRIDComparisonOperator op = CUBRIDComparisonOperator.getRandom();
+        // c < c, c > c and c <> c fold to FALSE at compile time, and with them the WHERE of a subquery
+        if (onlyColumnLeaves
+                && (op == CUBRIDComparisonOperator.LESS || op == CUBRIDComparisonOperator.GREATER
+                        || op == CUBRIDComparisonOperator.NOT_EQUALS || op == CUBRIDComparisonOperator.BANG_EQUALS)
+                && CUBRIDToStringVisitor.asString(left).equals(CUBRIDToStringVisitor.asString(right))) {
+            op = Randomly.fromOptions(CUBRIDComparisonOperator.EQUALS, CUBRIDComparisonOperator.LESS_EQUALS,
+                    CUBRIDComparisonOperator.GREATER_EQUALS);
+        }
         if (op == CUBRIDComparisonOperator.NULL_SAFE_EQUALS && CUBRIDBugs.nullSafeEqualsOfTwoMinuses
                 && hasUnaryMinus(left) && hasUnaryMinus(right)) {
             op = CUBRIDComparisonOperator.EQUALS;
@@ -213,7 +224,8 @@ public class CUBRIDExpressionGenerator extends TypedExpressionGenerator<CUBRIDEx
 
     private boolean canGenerateSubquery() {
         return globalState.getDbmsSpecificOptions().testSubqueries && subqueryDepth < MAX_SUBQUERY_DEPTH
-                && groupColumns == null && !globalState.getSchema().getDatabaseTables().isEmpty();
+                && groupColumns == null && !globalState.getSchema().getDatabaseTables().isEmpty()
+                && !(CUBRIDBugs.antiJoinTakesNoTableTermIntoInnerScan && subqueryCount > 0);
     }
 
     private CUBRIDTable randomTable() {
@@ -243,12 +255,14 @@ public class CUBRIDExpressionGenerator extends TypedExpressionGenerator<CUBRIDEx
     // SELECT fetch FROM table [WHERE p]: p sees the columns of the table and those of the outer query, which makes the
     // subquery a correlated one when it names an outer column
     private CUBRIDSelect generateSubquery(CUBRIDTable table, CUBRIDExpression fetch, boolean withWhere, int depth) {
+        subqueryCount++;
         CUBRIDSelect select = new CUBRIDSelect();
         select.setFetchColumns(List.of(fetch));
         select.setFromList(List.of(new CUBRIDTableReference(table)));
         if (withWhere && !Randomly.getBooleanWithSmallProbability()) {
             List<CUBRIDColumn> visible = new ArrayList<>(table.getColumns());
-            if (!CUBRIDBugs.parallelUnionCorrelatedSubqueryCrash || !readsSeveralTables()) {
+            if (!CUBRIDBugs.antiJoinTakesNoTableTermIntoInnerScan
+                    && (!CUBRIDBugs.parallelUnionCorrelatedSubqueryCrash || !readsSeveralTables())) {
                 visible.addAll(columns);
             }
             CUBRIDExpressionGenerator inner = new CUBRIDExpressionGenerator(globalState).setColumns(visible);
@@ -267,6 +281,12 @@ public class CUBRIDExpressionGenerator extends TypedExpressionGenerator<CUBRIDEx
     // tables out of tables, the columns keep them.
     private boolean readsSeveralTables() {
         return columns.stream().map(CUBRIDColumn::getTable).distinct().count() > 1;
+    }
+
+    // every leaf a column, so that no term reads no table (CUBRIDBugs.outerJoinOnTermWithoutTableFiltersAll)
+    public CUBRIDExpressionGenerator withOnlyColumnLeaves() {
+        onlyColumnLeaves = true;
+        return this;
     }
 
     // for an ON condition or a DML statement, where a subquery is not wanted
@@ -361,6 +381,10 @@ public class CUBRIDExpressionGenerator extends TypedExpressionGenerator<CUBRIDEx
         List<CUBRIDFunc> functions = CUBRIDFunc.getFunctions(type);
         if (avoidCoalesce) {
             functions = functions.stream().filter(f -> f != CUBRIDFunc.COALESCE).collect(Collectors.toList());
+        }
+        if (avoidNullableShapes) {
+            // NULLIF (5, c) is 5 when c is NULL, but the list of operators that can be true on NULL leaves it out
+            functions = functions.stream().filter(f -> f != CUBRIDFunc.NULLIF).collect(Collectors.toList());
         }
         CUBRIDFunc func = Randomly.fromList(functions);
         return new CUBRIDFunction<>(generateExpressions(type, func.getNrArgs(), depth + 1), func);
@@ -538,6 +562,7 @@ public class CUBRIDExpressionGenerator extends TypedExpressionGenerator<CUBRIDEx
         this.columns = targetTables.getColumns();
         this.tables = targetTables.getTables();
         this.avoidNullableShapes = false;
+        this.subqueryCount = 0;
         return this;
     }
 
@@ -560,9 +585,20 @@ public class CUBRIDExpressionGenerator extends TypedExpressionGenerator<CUBRIDEx
                 .collect(Collectors.toList());
         List<CUBRIDJoin> joins = CUBRIDJoin.getJoins(tableList, globalState);
         tables = tableList.stream().map(t -> t.getTable()).collect(Collectors.toList());
-        if (CUBRIDBugs.outerJoinReducedByNullablePredicate && joins.stream()
-                .anyMatch(j -> j.getJoinType() == JoinType.LEFT || j.getJoinType() == JoinType.RIGHT)) {
-            avoidNullableShapes = true;
+        if (CUBRIDBugs.outerJoinReducedByNullablePredicate) {
+            // The WHERE names no column of a table an outer join fills with NULL: TLP negates the WHERE, and the
+            // reduction takes NOT (a AND b) for a term that rejects those NULL rows whatever forms the WHERE avoids.
+            Set<CUBRIDTable> nullFilled = new HashSet<>();
+            for (CUBRIDJoin join : joins) {
+                if (join.getJoinType() == JoinType.LEFT) {
+                    nullFilled.add(join.getRightTable().getTable());
+                } else if (join.getJoinType() == JoinType.RIGHT) {
+                    nullFilled.add(join.getLeftTable().getTable());
+                }
+            }
+            if (!nullFilled.isEmpty()) {
+                columns = columns.stream().filter(c -> !nullFilled.contains(c.getTable())).collect(Collectors.toList());
+            }
         }
         return joins;
     }
@@ -578,6 +614,13 @@ public class CUBRIDExpressionGenerator extends TypedExpressionGenerator<CUBRIDEx
             return List.of(star());
         }
         return Randomly.nonEmptySubset(columns).stream().map(CUBRIDColumnReference::new).collect(Collectors.toList());
+    }
+
+    // A GROUP BY over an index skips the sort as an ORDER BY does, on the same proof that a key column is not NULL.
+    public void prepareForGroupBy() {
+        if (CUBRIDBugs.orderBySkipOnIsFalse) {
+            avoidNullableShapes = true;
+        }
     }
 
     // Column references only: an integer constant in ORDER BY is a column position in CUBRID. The WHERE that comes

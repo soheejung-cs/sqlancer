@@ -43,6 +43,7 @@ public class CUBRIDTLPHavingOracle implements TestOracle<CUBRIDGlobalState> {
         CUBRIDSelect select = gen.generateSelect();
         select.setJoinClauses(gen.getRandomJoinClauses());
         select.setFromList(gen.getTableRefs());
+        gen.prepareForGroupBy();
         if (Randomly.getBoolean()) {
             select.setWhereClause(gen.generateBooleanExpression());
         }

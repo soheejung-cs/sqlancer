@@ -104,8 +104,8 @@ csql -u dba sqlancer0 -i case.sql      # 캠페인이 쓰지 않는 풀 DB 에�
 - `NOREC`: `the counts mismatch (a and b)` 아래에 두 질의가 남는다. `COUNT(*) ... WHERE p` 쪽이 틀린 경우가 많다(옵티마이저가 p 를 바꾼다).
 - `AGGREGATE`: `The aggregates mismatch` 아래에 한 번에 구한 질의와 세 갈래를 모은 질의가 남는다. DOUBLE 의 `SUM` 은
   더하는 순서에 따라 끝자리가 달라 만들지 않는다.
-- `WHERE_PREPARED`: 지금(develop 2026-11-05)은 JDBC 준비문에서 'Invalid XASL tree node content.' 를 자주 보고한다(조사 중) —
-  긴 캠페인에는 아직 넣지 않는다. 어긋난 질의 위의 `-- prepared:` 줄이 `?` 가 든 준비문, `-- parameters:` 줄이 바인드 값이다. csql 로
+- `WHERE_PREPARED`: develop 2026-11-05 은 JDBC 준비문에서 UNION ALL 의 한 갈래가 상수 거짓으로 접히면 'Invalid XASL tree node
+  content.' 를 낸다(CBRD-27961, CBRD-27583 의 회귀) — 고쳐질 때까지 긴 캠페인에는 넣지 않는다. 어긋난 질의 위의 `-- prepared:` 줄이 `?` 가 든 준비문, `-- parameters:` 줄이 바인드 값이다. csql 로
   다시 돌릴 때는 `?` 자리에 값을 넣되, 같은 질의를 리터럴로 돌려 맞으면 준비문·계획 캐시 쪽 결함이다.
 - `No more data`: JDBC 연결이 끊긴 것이다. 그 시각 CAS 프로세스가 살아 있고 csql 로 다시 돌려 정상이면 연결 문제로 본다.
 - `Request timed out`: 문장이 오래 걸렸거나, 클라이언트(브로커의 CAS)가 죽어 응답이 없었던 것이다. csql 로 다시
@@ -130,8 +130,8 @@ BETWEEN(WHERE 의 NOT 만 DOUBLE 로 비교, 둘 다 거짓)이 그렇다. 그�
 | 스위치 | 결함 |
 |---|---|
 | `setOperationFoldedToNull` | 갈래가 모두 상수 거짓인 집합 연산을 NULL 값으로 접는다 |
-| `outerJoinReducedByNullablePredicate` | NULL 에도 참인 술어로 외부 조인을 내부 조인으로 줄인다 — 켜져 있으면 외부 조인이 있는 질의의 WHERE 에 IN 목록·BETWEEN·IS TRUE/FALSE/UNKNOWN·술어를 품은 IS [NOT] NULL 을 넣지 않는다 |
-| `orderBySkipOnIsFalse` | `(c IS NOT NULL) IS FALSE` 를 NOT NULL 증거로 보고 ORDER BY 를 생략한다 — 켜져 있으면 ORDER BY 가 있는 질의의 WHERE 에서 위와 같은 꼴을 뺀다 |
+| `outerJoinReducedByNullablePredicate` | NULL 에도 참인 술어로 외부 조인을 내부 조인으로 줄인다(TLP 가 만드는 `NOT (a AND b)` 도 해당) — 켜져 있으면 외부 조인이 있는 질의의 WHERE 는 NULL 로 채워지는 표의 열을 쓰지 않는다 |
+| `orderBySkipOnIsFalse` | `(c IS NOT NULL) IS FALSE`·경계가 그 열인 NOT BETWEEN 을 NOT NULL 증거로 보고 인덱스로 ORDER BY·GROUP BY 정렬을 건너뛰어 NULL 행을 잃는다 — 켜져 있으면 ORDER BY·GROUP BY 가 있는 질의의 WHERE 에서 위와 같은 꼴을 뺀다 |
 | `nullSafeEqualsOfTwoMinuses` | `-x <=> -y` 가 'unknown opcode' 오류(debug 클라이언트는 assert 로 죽는다) — 켜져 있으면 두 피연산자 어딘가에 단항 마이너스가 있을 때 `<=>` 대신 `=` 를 쓴다(`+(-x)`, `-x` 로 접히는 CASE 도 같은 재작성에 닿는다) |
 | `inListCoercedToFixedLengthElement` | IN 목록을 길이가 정해진 원소의 도메인으로 바꾸다 오류 |
 | `caseFoldWithNullBranchCrash` | CASE 상수 접기에서 클라이언트 크래시(CBRD-27948) — 켜져 있으면 CASE 갈래에 NULL 상수를 넣지 않는다 |
@@ -142,7 +142,10 @@ BETWEEN(WHERE 의 NOT 만 DOUBLE 로 비교, 둘 다 거짓)이 그렇다. 그�
 | `foldedFalseSubqueryInXaslCacheKey` | 그런 부질의를 감싼 EXISTS 를 접은 값이 `null` 로 출력되어, 같은 자리에 NULL 이 오는 질의와 XASL 캐시 항목을 공유한다(CBRD-27957) — 위와 같이 부질의 WHERE 를 열로만 만든다 |
 | `parallelUnionCorrelatedSubqueryCrash` | UNION ALL 갈래를 병렬로 실행할 때, 두 표를 조인한 갈래의 IN 부질의가 다른 표를 참조하면 서버가 죽는다(CBRD-27959) — 켜져 있으면 표를 둘 이상 읽는 질의의 부질의는 바깥 열을 쓰지 않는다 |
 | `existsSelectListHostVariable` | EXISTS 부질의의 선택 목록이 바인드 변수이고 그 EXISTS 를 값으로 쓰면(IS [NOT] NULL, 선택 목록) 내부 오류 — 켜져 있으면 준비문에서도 EXISTS 부질의의 상수는 리터럴로 둔다 |
-| `derivedColumnOfFoldedNullCoalesce` | 뒤 인자가 NULL 로 접히는 COALESCE(`CAST(NULL AS INT)` 등)는 VARCHAR 가 되는데, 그 위의 파생 테이블 열은 접기 전 타입(정수)을 가져 서버·클라이언트가 문자열을 정수로 읽는다 — 켜져 있으면 집계 인자에 COALESCE 를 쓰지 않는다 |
+| `derivedColumnOfFoldedNullCoalesce` | 뒤 인자가 NULL 로 접히는 COALESCE·NVL(`CAST(NULL AS INT)` 등)은 VARCHAR 가 되는데, 그 위의 파생 테이블 열은 접기 전 타입(정수)으로 선언되어 클라이언트가 문자열을 정수로 읽는다(CBRD-27962) — 켜져 있으면 집계 인자에 COALESCE 를 쓰지 않는다 |
+| `antiJoinTakesNoTableTermIntoInnerScan` | NOT EXISTS·NOT IN 이 NL ANTI JOIN 으로 풀리면 테이블을 읽지 않는 WHERE 항(실행 때 계산하는 상수 식·비상관 부질의·바인드 변수)이 안쪽 스캔으로 내려가, 그 항이 거짓이면 바깥 행이 모두 나온다(CBRD-27605) — TLP 는 술어를 부정하므로, 켜져 있으면 부질의를 비상관으로만 만든다 |
+| `outerJoinOnTermWithoutTableFiltersAll` | 외부 조인 ON 의 항 중 어떤 표도 읽지 않는 것(실행 때 계산하는 상수 식·바인드 변수)이 FROM 에 다른 표가 있으면 조인 위에도 걸려, 거짓이면 NULL 로 채운 행 대신 행이 하나도 남지 않는다 — 켜져 있으면 외부 조인의 ON 은 잎을 열로만 만든다 |
+| `emptyIndexRootPrefixUnset` | 빈 인덱스를 만드는 `xbtree_add_index ()` 가 루트 머리의 `common_prefix` 를 초기화하지 않아, 여러 열 인덱스에 키를 넣다 debug 서버가 assert 로 죽는다(CBRD-27963) — `--debug-server true` 이면 인덱스와 기본 키를 한 열로 만든다 |
 | `debugXaslDumpUsesQueryAsFormat` | debug 서버가 병렬 실행기로 가는 질의(UNION ALL 등)의 XASL 을 덤프하며 질의 문장을 printf 서식으로 써, 리터럴의 `%n` 에 죽는다(CBRD-27955) — `--debug-server true` 이면 문자열·LIKE 패턴·연산자에 `%` 를 쓰지 않는다 |
 
 ## 7. debug 빌드로 돌리기

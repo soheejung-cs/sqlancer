@@ -5,6 +5,7 @@ import java.util.List;
 import sqlancer.Randomly;
 import sqlancer.common.query.ExpectedErrors;
 import sqlancer.common.query.SQLQueryAdapter;
+import sqlancer.cubrid.CUBRIDBugs;
 import sqlancer.cubrid.CUBRIDErrors;
 import sqlancer.cubrid.CUBRIDGlobalState;
 import sqlancer.cubrid.CUBRIDSchema.CUBRIDColumn;
@@ -29,7 +30,8 @@ public final class CUBRIDIndexGenerator {
         sb.append(" ON ");
         sb.append(table.getName());
         sb.append(" (");
-        List<CUBRIDColumn> columns = table.getRandomNonEmptyColumnSubset();
+        List<CUBRIDColumn> columns = CUBRIDBugs.singleColumnKeys(globalState)
+                ? List.of(Randomly.fromList(table.getColumns())) : table.getRandomNonEmptyColumnSubset();
         for (int i = 0; i < columns.size(); i++) {
             if (i != 0) {
                 sb.append(", ");
