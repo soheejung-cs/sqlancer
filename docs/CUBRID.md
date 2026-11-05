@@ -25,7 +25,13 @@ cd sqlancer
 mvn -B -q package -DskipTests        # target/sqlancer-2.0.0.jar 와 target/lib/
 ```
 
-Java 가 여럿이면 `JAVA_HOME` 을 11 이상으로 맞춘 뒤 빌드·실행한다.
+Java 가 여럿이면 `JAVA_HOME` 을 11 이상으로 맞춘 뒤 빌드·실행한다. Java 8 로 빌드하면 Java 버전을 말하지 않는
+`PluginContainerException` 으로 실패한다.
+
+```bash
+export JAVA_HOME=/usr/lib/jvm/java-11-openjdk      # 설치 경로는 장비마다 다르다
+export PATH=$JAVA_HOME/bin:$PATH
+```
 
 ## 2. 풀 DB 만들기
 
@@ -47,7 +53,7 @@ DB 하나가 데이터 버퍼 128M·로그 버퍼 16M 을 쓴다(서버 하나�
 ```bash
 mkdir -p run1 && cd run1               # 로그가 ./logs/cubrid/ 에 쌓인다
 java -Xmx2g -jar ../target/sqlancer-2.0.0.jar \
-     --num-threads 4 --num-tries 100 --timeout-seconds 600 \
+     --num-threads 4 --num-tries 100 --timeout-seconds 7200 --num-queries 2000 \
      --log-each-select true --print-progress-summary true \
      cubrid --oracle WHERE
 ```
@@ -66,7 +72,10 @@ java -Xmx2g -jar ../target/sqlancer-2.0.0.jar \
 | `--query-timeout` | 10 | 문장 하나의 시간 상한(초, 브로커가 끊는다) |
 | `--test-float` | false | FLOAT 열을 만들지 — 정밀도 차이를 따로 모으는 캠페인에서만 켠다(아래 5) |
 
-4스레드에서 초당 약 1,000~1,500 질의를 돈다.
+- `--num-queries` 는 DB 하나에 던질 질의 수다. SQLancer 기본값 100000 이면 몇 시간을 돌려도 DB(스키마·데이터)가 수십
+  개뿐이라, 인덱스·통계·데이터 모양에 달린 옵티마이저 결함을 덜 훑는다. 2000 이면 4스레드에서 새 DB 를 초당 약 0.5개 만든다
+  (develop, 2시간 645만 질의·DB 약 3,000개, 초당 약 800 질의).
+- `--log-each-select false` 는 쓰지 않는다 — SQLancer 본체가 `logExecutionTime()` 에서 AssertionError 를 던져 바로 멈춘다.
 
 ## 4. 결과 읽기
 
@@ -81,6 +90,7 @@ csql -u dba sqlancer0 -i case.sql      # 캠페인이 쓰지 않는 풀 DB 에�
 
 - 결과 불일치: 원 질의 행 수와 세 갈래 행 수의 합을 비교한다. 세 갈래를 따로 돌리면(`UNION ALL` 을 나눠서)
   어느 갈래가 틀렸는지 보인다.
+- `No more data`: JDBC 연결이 끊긴 것이다. 그 시각 CAS 프로세스가 살아 있고 csql 로 다시 돌려 정상이면 연결 문제로 본다.
 - `Request timed out`: 문장이 오래 걸렸거나, 클라이언트(브로커의 CAS)가 죽어 응답이 없었던 것이다. csql 로 다시
   돌려 csql 이 죽으면 크래시다(코어 덤프 확인).
 
@@ -88,7 +98,9 @@ csql -u dba sqlancer0 -i case.sql      # 캠페인이 쓰지 않는 풀 DB 에�
 
 CUBRID 는 성능을 위해 NUMERIC 으로 캐스트하고 연산자마다 정해진 변환을 한다. 그 때문에 생기는 정밀도 차이는
 결함 목록에 넣지 않고 따로 모은다. 예: FLOAT 과 INT 의 비교는 FLOAT 으로 반올림되어 TLP 가 어긋날 수 있다.
-가르는 법 — 준비 문장의 FLOAT 열을 DOUBLE 로 바꿔 다시 돌려 합이 맞으면 정밀도 계열이다. 그래서 FLOAT 열은
+BIGINT 열도 2^53 을 넘는 값이 DOUBLE 경계(`0.5E0` 같은 지수 리터럴)와 비교되면 같은 일이 생긴다.
+가르는 법 — 준비 문장의 FLOAT 열을 DOUBLE 로, 또는 DOUBLE 리터럴을 지수 없는 같은 값(NUMERIC)으로 바꿔 다시 돌려 합이
+맞으면 정밀도 계열이다. 그래서 FLOAT 열은
 `--test-float true` 일 때만 만든다.
 
 ## 6. 알려진 결함 스위치
