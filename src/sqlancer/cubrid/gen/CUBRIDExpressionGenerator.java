@@ -139,9 +139,10 @@ public class CUBRIDExpressionGenerator extends TypedExpressionGenerator<CUBRIDEx
         if (!CUBRIDBugs.likeRuntimePatternMissesEmptyString && Randomly.getBoolean()) {
             return generateExpression(CUBRIDDataType.VARCHAR, depth);
         }
-        StringBuilder pattern = new StringBuilder(globalState.getRandomly().getString());
+        StringBuilder pattern = new StringBuilder(getString());
         for (int i = 0; i < Randomly.smallNumber() + 1; i++) {
-            pattern.insert((int) Randomly.getNotCachedInteger(0, pattern.length() + 1), Randomly.fromOptions('%', '_'));
+            char wildcard = avoidPercent() ? '_' : Randomly.fromOptions('%', '_');
+            pattern.insert((int) Randomly.getNotCachedInteger(0, pattern.length() + 1), wildcard);
         }
         return CUBRIDConstant.createStringConstant(pattern.toString());
     }
@@ -156,7 +157,10 @@ public class CUBRIDExpressionGenerator extends TypedExpressionGenerator<CUBRIDEx
             if (type == CUBRIDDataType.INT) {
                 return new CUBRIDBinaryOperation(generateExpression(CUBRIDDataType.INT, depth + 1),
                         generateExpression(CUBRIDDataType.INT, depth + 1),
-                        Randomly.fromOptions(CUBRIDArithmeticOperator.values()));
+                        avoidPercent()
+                                ? Randomly.fromOptions(CUBRIDArithmeticOperator.ADD, CUBRIDArithmeticOperator.SUB,
+                                        CUBRIDArithmeticOperator.MUL, CUBRIDArithmeticOperator.DIV)
+                                : Randomly.fromOptions(CUBRIDArithmeticOperator.values()));
             }
             CUBRIDDataType other = Randomly.fromOptions(CUBRIDDataType.INT, CUBRIDDataType.DOUBLE);
             CUBRIDExpression left = generateExpression(CUBRIDDataType.DOUBLE, depth + 1);
@@ -247,10 +251,20 @@ public class CUBRIDExpressionGenerator extends TypedExpressionGenerator<CUBRIDEx
         case DOUBLE:
             return CUBRIDConstant.createDoubleConstant(getDouble(r));
         case VARCHAR:
-            return CUBRIDConstant.createStringConstant(r.getString());
+            return CUBRIDConstant.createStringConstant(getString());
         default:
             throw new AssertionError(type);
         }
+    }
+
+    // a random string, without % where a debug server would read it as a printf conversion
+    private String getString() {
+        String value = globalState.getRandomly().getString();
+        return avoidPercent() ? value.replace('%', '#') : value;
+    }
+
+    private boolean avoidPercent() {
+        return CUBRIDBugs.debugXaslDumpUsesQueryAsFormat && globalState.getDbmsSpecificOptions().debugServer;
     }
 
     // A double CUBRID can read back as a literal, which a subnormal is not ("exceeds limit of double"). Integral

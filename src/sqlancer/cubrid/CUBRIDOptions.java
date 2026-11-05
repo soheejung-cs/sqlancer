@@ -38,6 +38,10 @@ public class CUBRIDOptions implements DBMSSpecificOptions<CUBRIDOracleFactory> {
             + "predicate and its negation both TRUE, a known defect)", arity = 1)
     public boolean testFloat;
 
+    @Parameter(names = "--debug-server", description = "The server is a debug build: steer clear of what takes only a "
+            + "debug server down", arity = 1)
+    public boolean debugServer;
+
     @Override
     public List<CUBRIDOracleFactory> getTestOracleFactory() {
         return oracles;

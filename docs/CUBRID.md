@@ -71,6 +71,7 @@ java -Xmx2g -jar ../target/sqlancer-2.0.0.jar \
 | `--max-num-tables` | 3 | 만들 테이블 수 상한 |
 | `--query-timeout` | 10 | 문장 하나의 시간 상한(초, 브로커가 끊는다) |
 | `--test-float` | false | FLOAT 열을 만들지 — 켜면 FLOAT·INT 비교 결함이 다시 보고된다(아래 5) |
+| `--debug-server` | false | 서버가 debug 빌드일 때 켠다 — debug 서버만 죽이는 꼴(질의 문장의 `%`, CBRD-27955)을 피한다(아래 7) |
 
 - `--num-queries` 는 DB 하나에 던질 질의 수다. SQLancer 기본값 100000 이면 몇 시간을 돌려도 DB(스키마·데이터)가 수십
   개뿐이라, 인덱스·통계·데이터 모양에 달린 옵티마이저 결함을 덜 훑는다. 2000 이면 4스레드에서 새 DB 를 초당 약 0.5개 만든다
@@ -121,9 +122,28 @@ BETWEEN(WHERE 의 NOT 만 DOUBLE 로 비교, 둘 다 거짓)이 그렇다. 그�
 | `likeRuntimePatternMissesEmptyString` | 실행 때 정해지는 LIKE 패턴('', '%')이 빈 문자열 행을 놓친다 — 켜져 있으면 패턴을 리터럴로만 만든다 |
 | `betweenNegationCastsToDouble` | WHERE 의 NOT BETWEEN 이 정수와 DOUBLE 이 섞인 피연산자를 모두 DOUBLE 로 바꿔, 2^53 을 넘는 BIGINT 행이 p·NOT p 둘 다에서 빠진다 — 켜져 있으면 BETWEEN 경계를 피연산자와 같은 종류로 만든다 |
 | (스위치 없음) | FLOAT 과 INT 의 비교에서 p 와 NOT p 가 둘 다 참 — `--test-float` 기본값 false 로 피한다 |
+| `debugXaslDumpUsesQueryAsFormat` | debug 서버가 병렬 실행기로 가는 질의(UNION ALL 등)의 XASL 을 덤프하며 질의 문장을 printf 서식으로 써, 리터럴의 `%n` 에 죽는다(CBRD-27955) — `--debug-server true` 이면 문자열·LIKE 패턴·연산자에 `%` 를 쓰지 않는다 |
 
-## 7. 주의
+## 7. debug 빌드로 돌리기
+
+debug 빌드 서버는 assert 가 판정 수단이 된다(assert 에 걸리면 서버가 죽는다). release 와 같은 풀 DB 를 debug 설치본으로 띄우고
+`--debug-server true` 를 준다. debug 서버는 느리므로 `--query-timeout` 을 늘린다.
+
+```bash
+java -Xmx2g -jar ../target/sqlancer-2.0.0.jar --num-threads 4 --num-tries 1000 --num-queries 2000 \
+     --log-each-select true --print-progress-summary true \
+     cubrid --oracle WHERE --debug-server true --query-timeout 30 > run.out 2>&1 &
+echo $! > run.pid
+../scripts/cubrid/sqlancer-cubrid-watchdog.sh . 4 &     # 서버가 죽은 기록(오류 로그 끝·코어)을 ./watchdog.log 에
+```
+
+- 서버가 죽으면 master 가 보통 스스로 다시 띄운다(`auto_restart_server`). 감시 스크립트는 그 기록을 남기고, 다시 뜨지 않은 서버를
+  띄운다. 코어가 쏟아지지 않게 하루 30번까지만 띄운다(`MAX_RESTARTS`).
+- 서버 코어는 수 GB 다. 코어 디렉터리(`kernel.core_pattern`)의 여유를 먼저 본다.
+- 콜스택은 `gdb -batch -ex bt $CUBRID/bin/cub_server <core>` 로 본다.
+
+## 8. 주의
 
 - 풀 DB 의 사용자 테이블은 SQLancer 가 지운다. 다른 데이터가 있는 DB 를 풀로 쓰지 않는다.
 - CTP 의 shell TC 처럼 `cub` 프로세스를 죽이거나 서비스를 멈추는 시험과 같은 장비에서 동시에 돌리지 않는다.
-- 서버 assert 를 암묵적 판정으로 쓰려면 디버그 빌드에서 돌린다(서버가 죽으면 연결 오류로 보고된다).
+- 서버 assert 를 판정으로 쓰려면 debug 빌드로 돌린다(위 7). 서버가 죽으면 SQLancer 에는 연결 오류로 보고된다.

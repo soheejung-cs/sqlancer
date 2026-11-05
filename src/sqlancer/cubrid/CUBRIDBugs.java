@@ -51,6 +51,12 @@ public final class CUBRIDBugs {
     // SELECT COUNT(*) FROM t WHERE NOT (c BETWEEN c + 2 AND 0.5E0) -- c BIGINT -9223372036854775808: 0, expected 1
     public static boolean betweenNegationCastsToDouble = true;
 
+    // A debug server logs the XASL tree of a query that enters the parallel executor (a UNION ALL, for one) with the
+    // query text as the printf format: a literal that stays in the text, such as a NOT LIKE pattern, with %n in it
+    // takes the server down. Applies only with --debug-server true. CBRD-27955.
+    // SELECT c FROM t WHERE c LIKE '%n%n' UNION ALL SELECT c FROM t WHERE c NOT LIKE '%n%n'
+    public static boolean debugXaslDumpUsesQueryAsFormat = true;
+
     private CUBRIDBugs() {
     }
 
