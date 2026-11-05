@@ -252,8 +252,16 @@ public class CUBRIDExpressionGenerator extends TypedExpressionGenerator<CUBRIDEx
                 CUBRIDComparisonOperator.NOT_EQUALS, CUBRIDComparisonOperator.LESS,
                 CUBRIDComparisonOperator.LESS_EQUALS, CUBRIDComparisonOperator.GREATER,
                 CUBRIDComparisonOperator.GREATER_EQUALS);
+        Quantifier quantifier = Randomly.fromOptions(Quantifier.values());
+        // = ANY is IN and <> ALL is NOT IN: the anti join of CUBRIDBugs.antiJoinTakesNoTableTermIntoInnerScan
+        if (CUBRIDBugs.antiJoinTakesNoTableTermIntoInnerScan
+                && (op == CUBRIDComparisonOperator.EQUALS ? quantifier != Quantifier.ALL
+                        : op == CUBRIDComparisonOperator.NOT_EQUALS && quantifier == Quantifier.ALL)) {
+            op = Randomly.fromOptions(CUBRIDComparisonOperator.LESS, CUBRIDComparisonOperator.LESS_EQUALS,
+                    CUBRIDComparisonOperator.GREATER, CUBRIDComparisonOperator.GREATER_EQUALS);
+        }
         return new CUBRIDQuantifiedComparison(generateExpression(comparableType(column.getType()), depth + 1), op,
-                Randomly.fromOptions(Quantifier.values()), subquery);
+                quantifier, subquery);
     }
 
     // SELECT fetch FROM table [WHERE p]: p sees the columns of the table and those of the outer query, which makes the
